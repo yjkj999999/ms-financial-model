@@ -2,7 +2,7 @@
 
 > Investment-grade financial model generator for CGMA/ACCA/CPA/CFA professionals.
 
-**Author**: WANG DONG JIE | **License**: MIT | **Version**: 1.0.0
+**Author**: WANG DONG JIE | **License**: MIT | **Version**: 1.1.0
 
 ## Features
 
@@ -12,7 +12,11 @@
 - PE Band historical analysis with area chart
 - Comparable company analysis (multi-market: US/HK/A-share)
 - Operational KPI dashboard
-- 5 publication-grade openpyxl charts
+- Stacked Revenue by Segment chart
+- Donut Chart for SOTP (DoughnutChart)
+- Grouped Scenario Comparison chart (Bear/Base/Bull)
+- Dual-Axis Combo chart (Revenue bar + EBITDA Margin line)
+- Total: 9 publication-grade openpyxl charts
 - 8 color themes, zh/en/bilingual support
 
 ## Quick Start

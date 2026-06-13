@@ -370,6 +370,6 @@ pip install openpyxl>=3.1
 
 **Author**: WANG DONG JIE ([@yjkj999999](https://github.com/yjkj999999) | [Clawhub](https://clawhub.ai/user/yjkj999999))
 
-**Version**: 1.0.0 | **License**: MIT | **Category**: Financial Modeling
+**Version**: 1.1.0 | **License**: MIT | **Category**: Financial Modeling
 
 > 适用于 CGMA/ACCA/CPA/CFA 持证人及全球 200 万专业会员。生成符合投行标准的 DCF/SOTP 投资级财务模型。

@@ -3414,6 +3414,505 @@ def _add_pe_band_chart(wb, sheet_name, theme="classic"):
     ws.add_chart(chart, "J3")
 
 
+def _add_stacked_revenue_chart(wb, sheet_name, theme="classic"):
+    """Add stacked bar chart showing revenue breakdown by business segment.
+
+    Scans the DCF sheet for segment revenue rows (rows 4..4+n_seg-1 by convention,
+    where each row in col B starts with two spaces indicating a segment name).
+    Uses from_rows=True for openpyxl row-oriented data.
+    Each segment gets a distinct color from CHART_PALETTE.
+    """
+    if sheet_name not in wb.sheetnames:
+        return
+    ws = wb[sheet_name]
+
+    year_header_row = 2
+    col_start = 3
+
+    # Find last data column from year headers
+    last_col = col_start
+    for c in range(col_start, ws.max_column + 1):
+        if ws.cell(row=year_header_row, column=c).value is not None:
+            last_col = c
+
+    # Scan for segment revenue rows: rows where col B starts with "  " (two spaces)
+    # and have numeric data, stopping before "Total Revenue"
+    seg_rows = []
+    for row in range(1, ws.max_row + 1):
+        cell_val = ws.cell(row=row, column=2).value
+        if cell_val and isinstance(cell_val, str):
+            cv = cell_val.strip()
+            # Stop at Total Revenue row
+            if "Total Revenue" in cv or "总收入" in cv:
+                break
+            # Segment rows are indented with two spaces
+            if cell_val.startswith("  ") and cv != "":
+                # Verify row has numeric data
+                has_data = False
+                for c in range(col_start, last_col + 1):
+                    val = ws.cell(row=row, column=c).value
+                    if val is not None:
+                        has_data = True
+                        break
+                if has_data:
+                    seg_rows.append(row)
+
+    if len(seg_rows) < 1:
+        return
+
+    # Categories (year headers)
+    cats = Reference(ws, min_col=col_start, max_col=last_col,
+                     min_row=year_header_row, max_row=year_header_row)
+
+    chart = BarChart()
+    chart.type = "col"
+    chart.grouping = "stacked"
+    chart.title = "Revenue Breakdown by Segment ($M)"
+    chart.style = 2
+
+    chart.width = CHART_WIDTH_CM
+    chart.height = CHART_HEIGHT_CM
+    chart.legend.position = 'b'
+    chart.legend.includeInLayout = False
+
+    chart.title = "Revenue Breakdown by Segment ($M)"
+    chart.title.txPr = _chart_title_rich_text("Revenue Breakdown by Segment ($M)")
+
+    chart.legend.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LEGEND_SIZE)
+            ),
+        )]
+    )
+
+    chart.gapWidth = CHART_GAP_WIDTH
+
+    # Add each segment as a series using from_rows=True
+    for i, seg_row in enumerate(seg_rows):
+        data_ref = Reference(ws, min_col=col_start, max_col=last_col,
+                             min_row=seg_row, max_row=seg_row)
+        chart.add_data(data_ref, titles_from_data=False, from_rows=True)
+
+        s = chart.series[i]
+        # Use segment name (trimmed) as series title
+        seg_name = ws.cell(row=seg_row, column=2).value.strip()
+        s.title = SeriesLabel(v=seg_name)
+        # Assign color from CHART_PALETTE
+        color_idx = i % len(CHART_PALETTE)
+        s.graphicalProperties.solidFill = CHART_PALETTE[color_idx]
+
+    chart.set_categories(cats)
+
+    # Y-axis formatting
+    chart.y_axis.title = "$M"
+    chart.y_axis.numFmt = '#,##0'
+    chart.y_axis.delete = False
+    chart.x_axis.delete = False
+
+    # Place chart below the margin line chart (row 35)
+    anchor_col = last_col + 2
+    ws.add_chart(chart, f"{get_column_letter(anchor_col)}35")
+
+
+def _add_donut_chart(wb, sheet_name, theme="classic"):
+    """Add donut/ring chart for SOTP or market composition.
+
+    Uses DoughnutChart from openpyxl if available, otherwise falls back to
+    PieChart. Shows total enterprise value in center via a data label on the
+    last data point.
+    """
+    if sheet_name not in wb.sheetnames:
+        return
+    ws = wb[sheet_name]
+
+    # SOTP layout: headers at row 4, data starts at row 5
+    # Col B = segment name, Col G = EV
+    header_row = 4
+    data_start_row = 5
+
+    # Find how many segments
+    last_data_row = data_start_row
+    for r in range(data_start_row, ws.max_row + 1):
+        if ws.cell(row=r, column=2).value is not None and \
+           ws.cell(row=r, column=7).value is not None:
+            last_data_row = r
+        else:
+            break
+
+    n_segs = last_data_row - data_start_row + 1
+    if n_segs <= 0:
+        return
+
+    # Categories (segment names)
+    cats = Reference(ws, min_col=2, min_row=data_start_row, max_row=last_data_row)
+
+    # Data (EV values)
+    data = Reference(ws, min_col=7, min_row=data_start_row, max_row=last_data_row)
+
+    # Try to use DoughnutChart (available in openpyxl >= 3.0)
+    try:
+        from openpyxl.chart import DoughnutChart
+        chart = DoughnutChart()
+        chart_type = "doughnut"
+    except ImportError:
+        chart = PieChart()
+        chart_type = "pie"
+
+    chart.title = "SOTP - Enterprise Value by Segment (Donut)"
+    chart.style = 2
+
+    chart.width = CHART_WIDTH_CM
+    chart.height = CHART_HEIGHT_CM
+    chart.legend.position = 'r'
+    chart.legend.includeInLayout = False
+
+    chart.title = "SOTP - Enterprise Value by Segment (Donut)"
+    chart.title.txPr = _chart_title_rich_text("SOTP - Enterprise Value by Segment (Donut)")
+
+    chart.legend.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LEGEND_SIZE)
+            ),
+        )]
+    )
+
+    chart.add_data(data, titles_from_data=False)
+    chart.set_categories(cats)
+
+    # Apply MS 8-color palette to slices
+    series = chart.series[0]
+    for i in range(n_segs):
+        pt = DataPoint(idx=i)
+        color_idx = i % len(CHART_PALETTE)
+        pt.graphicalProperties.solidFill = CHART_PALETTE[color_idx]
+        series.data_points.append(pt)
+
+    # Data labels: show percentage
+    series.dLbls = DataLabelList()
+    series.dLbls.showPercent = True
+    series.dLbls.showCatName = False
+    series.dLbls.showVal = False
+    series.dLbls.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LABEL_SIZE, b=True)
+            ),
+        )]
+    )
+
+    # For DoughnutChart, set hole size if supported
+    if chart_type == "doughnut" and hasattr(chart, 'holeSize'):
+        chart.holeSize = 50
+
+    # Place chart below the existing pie chart
+    ws.add_chart(chart, "J20")
+
+
+def _add_grouped_scenario_chart(wb, sheet_name, theme="classic"):
+    """Add grouped/clustered bar chart comparing Bear/Base/Bull scenarios.
+
+    Reads key valuation metrics (Revenue, EBITDA, Equity Value, Price per Share)
+    from each of the three DCF scenario sheets and displays them side by side.
+    Each scenario uses its signature color (BEAR_COLOR, BASE_COLOR, BULL_COLOR).
+    """
+    # Collect data from all three scenario sheets
+    scenario_names = ["bear", "base", "bull"]
+    scenario_colors = [BEAR_COLOR, BASE_COLOR, BULL_COLOR]
+    scenario_labels = ["Bear Case", "Base Case", "Bull Case"]
+
+    # Metrics to extract from each scenario sheet
+    metric_keys = [
+        ("Total Revenue", "总收入", "Revenue ($M)"),
+        ("EBITDA", "息税折旧摊销前利润", "EBITDA ($M)"),
+        ("Equity Value", "股权价值", "Equity Value ($M)"),
+        ("Per Share Value", "每股价值", "Price/Share ($)"),
+    ]
+
+    # Find the target sheet (we'll write helper data to the cover sheet or a new location)
+    # Use the first available scenario sheet as the anchor, or the cover sheet
+    # Better: write to the sheet specified by sheet_name
+    if sheet_name not in wb.sheetnames:
+        return
+    ws = wb[sheet_name]
+
+    # Helper data area: far right columns
+    helper_col_start = 30  # Column AD
+    helper_row_start = 1
+
+    # Write header row
+    ws.cell(row=helper_row_start, column=helper_col_start, value="Scenario")
+    for si, slabel in enumerate(scenario_labels):
+        ws.cell(row=helper_row_start, column=helper_col_start + 1 + si, value=slabel)
+
+    # For each metric, find values from each scenario sheet
+    metric_values = {mk: [None, None, None] for mk, _, _ in metric_keys}
+
+    for si, sc_name in enumerate(scenario_names):
+        sc_sheet = _scenario_sheet_name(sc_name, "en")
+        if sc_sheet not in wb.sheetnames:
+            continue
+        sc_ws = wb[sc_sheet]
+
+        for row in range(1, sc_ws.max_row + 1):
+            cell_val = sc_ws.cell(row=row, column=2).value
+            if cell_val and isinstance(cell_val, str):
+                cv = cell_val.strip()
+                for mk_zh, mk_en, _ in metric_keys:
+                    if mk_zh in cv or mk_en in cv:
+                        # Get the last forecast year value (last data column)
+                        val = sc_ws.cell(row=row, column=sc_ws.max_column).value
+                        if val is not None:
+                            # Use the key for storage
+                            storage_key = mk_zh
+                            metric_values[storage_key][si] = val
+                        break
+
+    # Write helper data for chart
+    data_rows = []
+    for mi, (mk_zh, mk_en, display_label) in enumerate(metric_keys):
+        r = helper_row_start + 1 + mi
+        ws.cell(row=r, column=helper_col_start, value=display_label)
+        vals = metric_values[mk_zh]
+        for si, v in enumerate(vals):
+            if v is not None:
+                ws.cell(row=r, column=helper_col_start + 1 + si, value=v)
+        data_rows.append(r)
+
+    n_metrics = len(data_rows)
+    if n_metrics == 0:
+        return
+
+    # Categories (metric names)
+    cats = Reference(ws, min_col=helper_col_start,
+                     min_row=helper_row_start + 1,
+                     max_row=helper_row_start + n_metrics)
+
+    chart = BarChart()
+    chart.type = "col"
+    chart.grouping = "clustered"
+    chart.title = "Scenario Comparison: Bear / Base / Bull"
+    chart.style = 2
+
+    chart.width = CHART_WIDTH_CM
+    chart.height = CHART_HEIGHT_CM
+    chart.legend.position = 'b'
+    chart.legend.includeInLayout = False
+
+    chart.title = "Scenario Comparison: Bear / Base / Bull"
+    chart.title.txPr = _chart_title_rich_text("Scenario Comparison: Bear / Base / Bull")
+
+    chart.legend.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LEGEND_SIZE)
+            ),
+        )]
+    )
+
+    chart.gapWidth = CHART_GAP_WIDTH
+
+    # Add one series per scenario (columns are scenario-oriented)
+    for si in range(3):
+        data_ref = Reference(ws, min_col=helper_col_start + 1 + si,
+                             min_row=helper_row_start,
+                             max_row=helper_row_start + n_metrics)
+        chart.add_data(data_ref, titles_from_data=True)
+        s = chart.series[si]
+        s.graphicalProperties.solidFill = scenario_colors[si]
+
+    chart.set_categories(cats)
+
+    # Y-axis formatting
+    chart.y_axis.numFmt = '#,##0'
+    chart.y_axis.delete = False
+    chart.x_axis.delete = False
+
+    # Data labels
+    for s in chart.series:
+        s.dLbls = DataLabelList()
+        s.dLbls.showVal = True
+        s.dLbls.numFmt = '#,##0'
+        s.dLbls.txPr = RichText(
+            p=[ChartParagraph(
+                pPr=ParagraphProperties(
+                    defRPr=CharacterProperties(sz=CHART_LABEL_SIZE, b=True)
+                ),
+            )]
+        )
+
+    # Place chart below the stacked revenue chart
+    ws.add_chart(chart, f"{get_column_letter(helper_col_start)}{helper_row_start + n_metrics + 2}")
+
+
+def _add_dual_axis_combo_chart(wb, sheet_name, theme="classic"):
+    """Add dual-axis combo chart: bar (Revenue $M) + line (EBITDA Margin %).
+
+    Common in MS reports for showing absolute values alongside margins.
+    Bar chart uses primary Y-axis (left), line chart uses secondary Y-axis (right).
+    """
+    if sheet_name not in wb.sheetnames:
+        return
+    ws = wb[sheet_name]
+
+    year_header_row = 2
+    col_start = 3
+
+    # Find Total Revenue row and EBITDA row
+    total_rev_row = None
+    ebitda_row = None
+
+    def _row_has_numeric_data(ws, row, col_start, col_end):
+        for c in range(col_start, col_end + 1):
+            val = ws.cell(row=row, column=c).value
+            if val is not None:
+                return True
+        return False
+
+    for row in range(1, ws.max_row + 1):
+        cell_val = ws.cell(row=row, column=2).value
+        if cell_val and isinstance(cell_val, str):
+            if "Total Revenue" in cell_val or "总收入" in cell_val:
+                if _row_has_numeric_data(ws, row, col_start, ws.max_column):
+                    total_rev_row = row
+            elif cell_val.strip() == "EBITDA" or cell_val.strip() == "息税折旧摊销前利润":
+                if _row_has_numeric_data(ws, row, col_start, ws.max_column):
+                    ebitda_row = row
+
+    if total_rev_row is None or ebitda_row is None:
+        return
+
+    # Find last data column
+    last_col = col_start
+    for c in range(col_start, ws.max_column + 1):
+        if ws.cell(row=year_header_row, column=c).value is not None:
+            last_col = c
+
+    # Categories (year headers)
+    cats = Reference(ws, min_col=col_start, max_col=last_col,
+                     min_row=year_header_row, max_row=year_header_row)
+
+    # Create bar chart for Revenue (primary axis)
+    bar_chart = BarChart()
+    bar_chart.type = "col"
+    bar_chart.grouping = "clustered"
+    bar_chart.title = "Revenue ($M) vs EBITDA Margin (%)"
+    bar_chart.style = 2
+    bar_chart.y_axis.title = "$M"
+    bar_chart.y_axis.numFmt = '#,##0'
+    bar_chart.y_axis.axId = 100
+
+    bar_chart.width = CHART_WIDTH_CM
+    bar_chart.height = CHART_HEIGHT_CM
+    bar_chart.legend.position = 'b'
+    bar_chart.legend.includeInLayout = False
+
+    bar_chart.title = "Revenue ($M) vs EBITDA Margin (%)"
+    bar_chart.title.txPr = _chart_title_rich_text("Revenue ($M) vs EBITDA Margin (%)")
+
+    bar_chart.legend.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LEGEND_SIZE)
+            ),
+        )]
+    )
+
+    bar_chart.gapWidth = CHART_GAP_WIDTH
+
+    # Revenue series (bar)
+    rev_data = Reference(ws, min_col=col_start, max_col=last_col,
+                         min_row=total_rev_row, max_row=total_rev_row)
+    bar_chart.add_data(rev_data, titles_from_data=False, from_rows=True)
+    bar_chart.set_categories(cats)
+
+    s_rev = bar_chart.series[0]
+    s_rev.title = SeriesLabel(v="Revenue ($M)")
+    s_rev.graphicalProperties.solidFill = CHART_PALETTE[0]
+
+    # Data labels for revenue bars
+    s_rev.dLbls = DataLabelList()
+    s_rev.dLbls.showVal = True
+    s_rev.dLbls.numFmt = '#,##0'
+    s_rev.dLbls.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LABEL_SIZE, b=True)
+            ),
+        )]
+    )
+
+    bar_chart.y_axis.delete = False
+    bar_chart.x_axis.delete = False
+
+    # Create line chart for EBITDA Margin (secondary axis)
+    # Write EBITDA Margin helper data
+    helper_col_start = 27  # Column AA
+    helper_row = max(ws.max_row + 2, 80)
+
+    ws.cell(row=helper_row, column=helper_col_start, value="EBITDA Margin (helper)")
+    for ci in range(col_start, last_col + 1):
+        cl = get_column_letter(ci)
+        hc = get_column_letter(helper_col_start + ci - col_start + 1)
+        formula = f"=IF({cl}{total_rev_row}=0,0,{cl}{ebitda_row}/{cl}{total_rev_row})"
+        c = ws.cell(row=helper_row, column=helper_col_start + ci - col_start + 1,
+                    value=formula)
+        c.number_format = '0.0%'
+
+    # Copy year headers to helper area
+    for ci in range(last_col - col_start + 1):
+        src_val = ws.cell(row=year_header_row, column=col_start + ci).value
+        ws.cell(row=helper_row - 1, column=helper_col_start + 1 + ci, value=src_val)
+
+    helper_last_col = helper_col_start + (last_col - col_start + 1)
+
+    line_chart = LineChart()
+    line_chart.y_axis.title = "EBITDA Margin (%)"
+    line_chart.y_axis.numFmt = '0%'
+    line_chart.y_axis.axId = 200
+    line_chart.y_axis.crosses = "max"
+
+    margin_data = Reference(ws, min_col=helper_col_start + 1, max_col=helper_last_col,
+                           min_row=helper_row, max_row=helper_row)
+    line_chart.add_data(margin_data, titles_from_data=False, from_rows=True)
+
+    # Use same categories as bar chart
+    cats_helper = Reference(ws, min_col=helper_col_start + 1, max_col=helper_last_col,
+                            min_row=helper_row - 1, max_row=helper_row - 1)
+    line_chart.set_categories(cats_helper)
+
+    s_margin = line_chart.series[0]
+    s_margin.title = SeriesLabel(v="EBITDA Margin (%)")
+    s_margin.graphicalProperties.line.solidFill = CHART_PALETTE[3]
+    s_margin.graphicalProperties.line.width = CHART_LINE_WIDTH
+    s_margin.marker.symbol = "circle"
+    s_margin.marker.size = 5
+    s_margin.marker.graphicalProperties.solidFill = CHART_PALETTE[3]
+
+    # Data labels for margin line
+    s_margin.dLbls = DataLabelList()
+    s_margin.dLbls.showVal = True
+    s_margin.dLbls.numFmt = '0.0%'
+    s_margin.dLbls.txPr = RichText(
+        p=[ChartParagraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=CHART_LABEL_SIZE, b=True)
+            ),
+        )]
+    )
+
+    line_chart.y_axis.delete = False
+    line_chart.x_axis.delete = False
+
+    # Overlay line chart on bar chart
+    bar_chart += line_chart
+
+    # Place chart below the stacked revenue chart
+    anchor_col = last_col + 2
+    ws.add_chart(bar_chart, f"{get_column_letter(anchor_col)}52")
+
+
 # ============================================================
 # 13. MAIN ENTRY POINT
 # ============================================================
@@ -3474,13 +3973,21 @@ def make_financial_model(data: dict, output_path: str,
     _add_revenue_ebitda_chart(wb, base_sheet_name, theme)
     _add_margin_line_chart(wb, base_sheet_name, theme)
 
-    # SOTP pie chart
+    # Stacked revenue breakdown + dual-axis combo on Base DCF sheet
+    _add_stacked_revenue_chart(wb, base_sheet_name, theme)
+    _add_dual_axis_combo_chart(wb, base_sheet_name, theme)
+
+    # SOTP pie chart + donut chart
     if data.get("sotp"):
         _add_sotp_pie_chart(wb, "SOTP", theme)
+        _add_donut_chart(wb, "SOTP", theme)
 
     # PE Band area chart
     if data.get("pe_band"):
         _add_pe_band_chart(wb, "PE Band", theme)
+
+    # Grouped scenario comparison chart (on Base DCF sheet, reads all 3 scenarios)
+    _add_grouped_scenario_chart(wb, base_sheet_name, theme)
 
     # Print settings
     for ws in wb.worksheets:
